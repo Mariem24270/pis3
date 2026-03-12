@@ -1,0 +1,77 @@
+.reservation-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 60;
+}
+
+.reservation-card {
+  width: 100%;
+  max-width: 520px;
+  background: white;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.25);
+  overflow: hidden;
+}
+
+.reservation-card header {
+  padding: 16px 18px;
+  background: linear-gradient(90deg, #2563eb, #22d3ee);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reservation-card form {
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.reservation-card input {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  padding: 12px 12px;
+  background: #f8fafc;
+}
+
+.reservation-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.reservation-actions button {
+  border-radius: 14px;
+  padding: 12px 12px;
+  font-weight: 800;
+  border: 0;
+  cursor: pointer;
+}
+
+.reservation-actions .primary {
+  background: #10b981;
+  color: white;
+}
+
+.reservation-actions .primary:hover {
+  background: #059669;
+}
+
+.reservation-actions .secondary {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.reservation-actions .secondary:hover {
+  background: #e2e8f0;
+}
+
