@@ -1,48 +1,34 @@
-import re
 import requests
 from django.conf import settings
 
 
-def normalize_phone(phone: str) -> str:
-    phone = (phone or "").strip()
-    phone = re.sub(r"[^\d+]", "", phone)
-
-    if phone.startswith("+"):
-        return phone
-
-    digits = re.sub(r"\D", "", phone)
-    if not digits:
-        return ""
-
-    cc = getattr(settings, "DEFAULT_COUNTRY_CODE", "+222")
-    return f"{cc}{digits}"
-
-
 def send_whatsapp_message(to_phone: str, text: str) -> dict:
-    api_key = getattr(settings, "WASENDER_API_KEY", "")
-    url = getattr(settings, "WASENDER_API_URL", "https://www.wasenderapi.com/api/send-message")
+    instance = getattr(settings, "ULTRAMSG_INSTANCE", "")
+    token = getattr(settings, "ULTRAMSG_TOKEN", "")
 
-    if not api_key:
-        return {"ok": False, "error": "WASENDER_API_KEY manquant dans settings.py"}
+    if not instance or not token:
+        return {"ok": False, "error": "ULTRAMSG_INSTANCE ou ULTRAMSG_TOKEN manquant dans settings.py"}
 
-    to_phone = normalize_phone(to_phone)
-    if not to_phone:
-        return {"ok": False, "error": "Numéro téléphone invalide"}
+    # Nettoyer le numéro — garder seulement les chiffres
+    phone = to_phone.strip().replace("+", "").replace(" ", "").replace("-", "")
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    # Ajouter indicatif +222 si numéro mauritanien sans indicatif
+    if len(phone) == 8:
+        phone = "222" + phone
+
+    url = f"https://api.ultramsg.com/{instance}/messages/chat"
+
     data = {
-        "to": to_phone,
-        "text": text
+        "token": token,
+        "to": phone,
+        "body": text,
+        "priority": 1,
     }
 
     try:
-        resp = requests.post(url, json=data, headers=headers, timeout=15)
-        try:
-            return resp.json()
-        except Exception:
-            return {"ok": False, "status_code": resp.status_code, "text": resp.text}
+        resp = requests.post(url, data=data, timeout=15)
+        print("=== ULTRAMSG RÉPONSE ===", resp.status_code, resp.text)
+        return resp.json()
     except requests.RequestException as e:
+        print("=== ULTRAMSG ERREUR ===", str(e))
         return {"ok": False, "error": str(e)}

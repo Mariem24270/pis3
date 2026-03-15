@@ -1,7 +1,8 @@
 import React from 'react';
 import { Check, Search, MessageCircle, Shield, CreditCard, ArrowRight, UserCheck } from 'lucide-react';
-
+import { useNavigate } from "react-router-dom";
 const Roles = () => {
+  const navigate = useNavigate();
   return (
     <section className="py-16 bg-white font-sans overflow-hidden">
       <div className="container mx-auto px-6 max-w-5xl">
@@ -69,8 +70,8 @@ const Roles = () => {
                   
                   {/* Forme grise principale avec la photo */}
                   <div className="relative rounded-[40%_60%_70%_30%/40%_50%_60%_50%] overflow-hidden aspect-square w-[280px] h-[280px] z-10 border-4 border-white shadow-xl">
-                    <img 
-                      src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=500" 
+                    <img src="https://t4.ftcdn.net/jpg/01/36/18/77/240_F_136187711_qeBMOwkPdTg1dCN8e5TR1AmduXDz60Xn.jpg" className="w-full h-full object-cover" alt="Medical"/>
+
                       className="w-full h-full object-cover" 
                       alt="Médecin" 
                     />
@@ -105,9 +106,12 @@ const Roles = () => {
                    <Check size={14} className="text-emerald-500" /> Archives Bankily
                 </span>
               </div>
-              <button className="flex items-center gap-2 text-blue-600 font-bold text-sm hover:translate-x-1 transition-transform pt-4">
-                Espace gestion <ArrowRight size={16} />
-              </button>
+             <button
+  onClick={() => navigate("/login")}
+  className="flex items-center gap-2 text-blue-600 font-bold text-sm hover:translate-x-1 transition-transform pt-4"
+>
+  Espace gestion <ArrowRight size={16} />
+</button>
             </div>
           </div>
 

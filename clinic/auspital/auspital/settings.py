@@ -9,8 +9,8 @@ DEBUG = True
 ALLOWED_HOSTS = ['*']
 DEFAULT_COUNTRY_CODE = "+222"
 
-WASENDER_API_KEY = "METS_ICI_TA_CLE_API"
-WASENDER_API_URL = "https://www.wasenderapi.com/api/send-message"
+ULTRAMSG_INSTANCE = "instance165702"
+ULTRAMSG_TOKEN = "g2ser433thkz9a2k"
 
 # Main admin bootstrap (DEV)
 # Change these values in production.
@@ -109,7 +109,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20,
+    'PAGE_SIZE': 300,
 }
 
 SIMPLE_JWT = {
@@ -132,6 +132,8 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     'DELETE','GET','OPTIONS','PATCH','POST','PUT',
 ]
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = False
 
 LOGGING = {
     'version': 1,

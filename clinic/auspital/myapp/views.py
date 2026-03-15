@@ -39,7 +39,7 @@ from .whatsapp import send_whatsapp_message
 from .ocr_tools import ocr_image_to_text, extract_nni_from_text, parse_bankili_text
 
 
-BANKILI_EXPECTED_RECEIVER = "26383942"
+BANKILI_EXPECTED_RECEIVER = "37343466"
 PAYMENT_WINDOW_MINUTES = 3
 SESSION_KEY = "payment_window_start"
 
@@ -149,9 +149,6 @@ class ConsultationPayeViewSet(viewsets.ModelViewSet):
                 return Response({"detail": "ONLY_DIAGNOSTIC_ALLOWED"}, status=400)
 
             diagnostic = request.data.get("diagnostic")
-            if not diagnostic:
-                return Response({"detail": "DIAGNOSTIC_REQUIRED"}, status=400)
-
             instance.diagnostic = diagnostic
             instance.save()
             serializer = self.get_serializer(instance)
@@ -305,112 +302,116 @@ def open_window(request, consultation_id):
     })
 
 
+# ============================================================
+# COPIEZ CES 2 FONCTIONS DANS votre views.py
+# Remplacez l'ancienne pay_consultation par la nouvelle
+# ============================================================
+
+
 @api_view(["POST"])
+@permission_classes([AllowAny])
 @parser_classes([MultiPartParser, FormParser])
 def pay_consultation(request, consultation_id):
+    """
+    Le patient envoie son NNI + reçu Bankily.
+    On sauvegarde les images SANS vérification OCR.
+    Statut = 'en_attente' → le secrétaire doit valider.
+    """
     nettoyer_consultations()
-
     c = get_object_or_404(ConsultationTemporaire, id=consultation_id)
-    test_mode = request.GET.get("test") == "1"
 
     if c.n_places <= 0:
         c.delete()
         return err("Plus de places disponibles.", status.HTTP_409_CONFLICT)
 
-    ser = PayRequestSerializer(data=request.data)
-    if not ser.is_valid():
-        return err("Données invalides.", details=ser.errors)
+    # Récupérer les données du formulaire
+    nom_complet = request.data.get("nomComplet_patient", "").strip()
+    numero_tel = request.data.get("numero_tel_patient", "").strip()
+    photo_nni = request.FILES.get("photo_nni")
+    capture_paiement = request.FILES.get("capture_paiement")
 
-    start_str = request.session.get(SESSION_KEY)
-
-    if not test_mode and not start_str:
-        return err("Fenêtre expirée. Ré-ouvre la réservation.")
-
-    if start_str:
-        window_start = timezone.datetime.fromisoformat(start_str)
-        if timezone.is_naive(window_start):
-            window_start = timezone.make_aware(window_start, timezone.get_current_timezone())
-        window_end = window_start + timedelta(minutes=PAYMENT_WINDOW_MINUTES)
-    else:
-        window_start = None
-        window_end = None
-
-    photo_nni = ser.validated_data["photo_nni"]
-    capture_paiement = ser.validated_data["capture_paiement"]
-
-    nni_text = ocr_image_to_text(photo_nni)
-    nni = extract_nni_from_text(nni_text)
-    if not nni:
-        return err("NNI illisible.")
-
-    pay_text = ocr_image_to_text(capture_paiement)
-    info = parse_bankili_text(pay_text)
-
-    if info["status_type"] != "transfert":
-        return err("Capture invalide: il faut 'Transfert réussi'.")
-    if not info["receiver"]:
-        return err("Receveur illisible.")
-    if info["receiver"] != BANKILI_EXPECTED_RECEIVER:
-        return err("Receveur incorrect.")
-    if info["amount"] is None:
-        return err("Montant illisible.")
-    if info["amount"] != c.montant:
-        return err("Montant incorrect.")
-    if not info["paiement_dt"]:
-        return err("Date/heure illisible.")
-
-    if not test_mode:
-        if not (window_start <= info["paiement_dt"] <= window_end):
-            return err("Paiement hors délai.")
+    # Vérifications basiques
+    if not nom_complet or not numero_tel:
+        return err("Nom et téléphone requis.")
+    if not photo_nni or not capture_paiement:
+        return err("Les deux images sont requises (NNI + reçu Bankily).")
 
     with transaction.atomic():
         locked = ConsultationTemporaire.objects.select_for_update().get(id=c.id)
 
         if locked.n_places <= 0:
-            locked.delete()
             return err("Plus disponible.", status.HTTP_409_CONFLICT)
 
-        ConsultationTemporaire.objects.filter(id=locked.id, n_places__gt=0).update(
-            n_places=F("n_places") - 1
-        )
-        locked.refresh_from_db()
-
+        # Sauvegarder la réservation avec statut "en_attente"
         paiement = ConsultationPaye.objects.create(
-            nom_complet=ser.validated_data["nomComplet_patient"],
-            numero_tel=ser.validated_data["numero_tel_patient"],
+            nom_complet=nom_complet,
+            numero_tel=numero_tel,
+            photo_nni=photo_nni,
+            capture_paiement=capture_paiement,
             date=timezone.now(),
             temporaire_id=locked.id,
             doctor=locked.doctor,
             specialite=locked.doctor.specialite,
+            montant=locked.montant,      # ← AJOUTER
+            statut='en_especes',         # ← AJOUTER
         )
 
-        if locked.n_places == 0:
+        # Réduire les places
+        if locked.n_places > 1:
+            locked.n_places -= 1
+            locked.save()
+        else:
             locked.delete()
-
-        message_text = (
-            f"Bonjour {ser.validated_data['nomComplet_patient']}, "
-            f"votre réservation est confirmée avec le docteur "
-            f"{c.doctor.user.username if c.doctor.user else c.doctor.id}. "
-            f"Spécialité: {c.doctor.specialite}. "
-            f"Montant: {c.montant} MRU."
-        )
-
-        wa_result = send_whatsapp_message(
-            ser.validated_data["numero_tel_patient"],
-            message_text
-        )
-
-    request.session.pop(SESSION_KEY, None)
 
     return ok({
         "paiement_id": paiement.id,
-        "places_restantes": 0 if locked.n_places == 0 else locked.n_places,
-        "message": "Paiement validé. Réservation confirmée.",
-        "test_mode": test_mode,
-        "whatsapp_result": wa_result,
+        "message": "Votre demande a été reçue. Le secrétaire va vérifier votre dossier.",
     }, http_status=status.HTTP_201_CREATED)
 
 
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def valider_reservation(request, paiement_id):
+    """
+    Le secrétaire valide ou rejette une réservation.
+    Si validé → envoi automatique d'un message WhatsApp au patient.
+    """
+    paiement = get_object_or_404(ConsultationPaye, id=paiement_id)
+    action = request.data.get("action")  # "valide" ou "rejete"
+
+    if action not in ["valide", "rejete"]:
+        return err("Action invalide. Utilisez 'valide' ou 'rejete'.")
+
+    paiement.statut = action
+    paiement.save()
+
+    # Envoi WhatsApp UNIQUEMENT si le secrétaire valide
+    wa_result = None
+    if action == "valide":
+        doctor_name = (
+            paiement.doctor.user.get_full_name()
+            or paiement.doctor.user.username
+            if paiement.doctor and paiement.doctor.user
+            else "votre médecin"
+        )
+
+        message_text = (
+            f"Bonjour {paiement.nom_complet},\n"
+            f"Votre réservation a été CONFIRMÉE.\n"
+            f"Médecin : Dr. {doctor_name}\n"
+            f"Spécialité : {paiement.specialite}\n"
+            f"Montant payé : {paiement.montant} MRU\n"
+            f"Merci de vous présenter à l'heure prévue."
+        )
+
+        wa_result = send_whatsapp_message(paiement.numero_tel, message_text)
+
+    return ok({
+        "message": f"Réservation {'validée' if action == 'valide' else 'rejetée'} avec succès.",
+        "whatsapp_result": wa_result,
+    })
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def secretary_reservation(request, consultation_id):
@@ -426,13 +427,9 @@ def secretary_reservation(request, consultation_id):
 
     try:
         with transaction.atomic():
-            # On récupère la consultation
             locked = ConsultationTemporaire.objects.select_for_update().get(id=c.id)
-            
-            # On compte les réservations existantes pour donner un numéro
             nombre_actuel = ConsultationPaye.objects.filter(temporaire_id=locked.id).count()
 
-            # CRÉATION DE LA RÉSERVATION (On a enlevé 'montant' ici)
             paiement = ConsultationPaye.objects.create(
                 nom_complet=ser.validated_data["nomComplet_patient"],
                 numero_tel=ser.validated_data["numero_tel_patient"],
@@ -441,10 +438,11 @@ def secretary_reservation(request, consultation_id):
                 temporaire_id=locked.id,
                 doctor=locked.doctor,
                 specialite=locked.doctor.specialite,
-                numero_reservation=nombre_actuel + 1
+                numero_reservation=nombre_actuel + 1,
+                montant=locked.montant,
+                statut='en_especes',  # ← VÉRIFIEZ QUE C'EST BIEN EN_ESPECES
             )
 
-            # Mise à jour des places
             if locked.n_places > 1:
                 locked.n_places -= 1
                 locked.save()
@@ -453,5 +451,4 @@ def secretary_reservation(request, consultation_id):
 
         return Response({"ok": True, "message": "Réservation enregistrée !"}, status=201)
     except Exception as e:
-        # Si une erreur arrive encore, elle s'affichera clairement dans le message rouge
-        return Response({"error": f"Erreur lors de l'enregistrement: {str(e)}"}, status=500)
+        return Response({"error": f"Erreur : {str(e)}"}, status=500)

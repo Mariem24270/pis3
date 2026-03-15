@@ -38,17 +38,25 @@ class ConsultationTemporaire(models.Model):
         return f"Consultation {self.doctor.user.username} - {self.date_fin}"
 
 class ConsultationPaye(models.Model):
+    STATUT_CHOICES = [
+        ('en_attente', 'En attente'),
+        ('valide', 'Validé'),
+        ('rejete', 'Rejeté'),
+        ('en_especes', 'En espèces'),   # ← AJOUTER
+    ]
     nom_complet = models.CharField(max_length=200)
     numero_tel = models.CharField(max_length=11)
     date = models.DateTimeField()
     montant = models.IntegerField(default=0)  # <--- AJOUTE CETTE LIGNE
     NNI = models.CharField(max_length=10)
+    photo_nni = models.ImageField(upload_to='reservations/nni/', null=True, blank=True)        # ← NOUVEAU
+    capture_paiement = models.ImageField(upload_to='reservations/paiements/', null=True, blank=True)  # ← NOUVEAU
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='en_attente')    # ← NOUVEAU
     temporaire_id = models.PositiveIntegerField(null=True, blank=True)
     numero_reservation = models.PositiveIntegerField(null=True, blank=True)
     doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True, related_name='consultations_payees')
     specialite = models.CharField(max_length=100)
-    diagnostic = models.CharField(max_length=3000)
-
+    diagnostic = models.CharField(max_length=3000, blank=True, default="")
     def __str__(self):
         return f"{self.nom_complet} - {self.date}"
         

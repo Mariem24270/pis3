@@ -153,7 +153,7 @@ const handleSubmit = async (e) => {
                </div>
             </div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-2">Réservation Confirmée !</h2>
-            <p className="text-slate-500 font-medium">Le patient a été ajouté avec succès à la liste d'attente.</p>
+            <p className="text-slate-500 font-medium">Le patient a été ajouté avec succès à la liste de reservation.</p>
             <div className="mt-8 flex justify-center">
                <div className="px-4 py-2 bg-slate-50 rounded-full border border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   Fermeture automatique...
