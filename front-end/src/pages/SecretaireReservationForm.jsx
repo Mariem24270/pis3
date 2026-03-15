@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { X, User, Phone, FileText, DollarSign, AlertCircle, Calendar, Clock } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { X, User, Phone, ShieldCheck, AlertCircle, Calendar, ChevronRight, CheckCircle2 } from "lucide-react";
 import { API_BASE_URL } from "../api/config";
 
 function SecretaireReservationForm({ consultation, onClose, onSuccess }) {
@@ -10,180 +10,157 @@ function SecretaireReservationForm({ consultation, onClose, onSuccess }) {
   });
 
   const [loading, setLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState("");
-
-  const validateNNI = (nni) => {
-    // NNI Mauritanie: 13 chiffres
-    const nniRegex = /^\d{13}$/;
-    return nniRegex.test(nni);
-  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
     setError("");
   };
+// Dans SecretaireReservationForm.jsx
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  setLoading(true);
+  setError("");
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError("");
+  try {
+    const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+    
+    // Aligné sur ton SecretaryReservationSerializer dans views.py
+    const payload = {
+      nomComplet_patient: formData.nomComplet_patient,
+      numero_tel_patient: formData.numero_tel_patient,
+      NNI: formData.numero_reservation // On envoie la valeur sous la clé "NNI"
+    };
 
-    if (!formData.nomComplet_patient || !formData.numero_tel_patient || !formData.numero_reservation) {
-      setError("Veuillez remplir tous les champs requis.");
-      return;
-    }
+    const response = await fetch(`${API_BASE_URL}/secretary-reservation/${consultation.id}/`, {
+      method: "POST",
+      headers: { 
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json" 
+      },
+      body: JSON.stringify(payload),
+    });
 
-    setLoading(true);
+    const data = await response.json();
 
-    try {
-      const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
-      const data = new FormData();
-      data.append("nomComplet_patient", formData.nomComplet_patient);
-      data.append("numero_tel_patient", formData.numero_tel_patient);
-      data.append("NNI", formData.numero_reservation);
-
-      const response = await fetch(
-        `${API_BASE_URL}/secretary-reservation/${consultation.id}/`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: data,
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        setError(result.error || result.detail || "Erreur lors de la réservation");
-        return;
+    if (response.ok) {
+      setIsSuccess(true);
+      setTimeout(() => {
+        onSuccess(); // Rafraîchit Dashboard & Liste Réservations
+        onClose();
+      }, 1500);
+    } else {
+      // Si Django renvoie des erreurs de validation (ex: NNI trop long)
+      if (data.details) {
+        // Affiche la première erreur de validation trouvée
+        const firstError = Object.values(data.details)[0][0];
+        setError(firstError);
+      } else {
+        setError(data.error || "Une erreur est survenue");
       }
-
-      onSuccess?.();
-      onClose();
-    } catch (err) {
-      setError("Erreur serveur. Vérifiez que le backend est démarré.");
-    } finally {
-      setLoading(false);
     }
-  };
-
+  } catch (err) {
+    setError("Erreur de connexion au serveur");
+  } finally {
+    setLoading(false);
+  }
+};
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/70 overflow-hidden">
-        {/* Header */}
-        <div className="relative bg-gradient-to-r from-[#1a365d] to-[#2b6cb0] px-6 py-6">
-          <button
-            onClick={onClose}
-            className="absolute top-3 right-3 p-1.5 hover:bg-white/20 rounded-full transition-colors"
-          >
-            <X className="h-4 w-4 text-white" />
-          </button>
-          <h2 className="text-xl font-bold text-white mb-4">
-            Nouvelle réservation
-          </h2>
-          <div className="text-sm text-blue-100 space-y-1">
-            <p><span className="font-semibold">{consultation.doctor_name}</span></p>
-            <p>{new Date(consultation.date_fin).toLocaleDateString("fr-FR", {
-              weekday: "short",
-              day: "2-digit",
-              month: "short",
-            })} à {new Date(consultation.date_fin).toLocaleTimeString("fr-FR", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}</p>
-            <p className="font-semibold">{consultation.montant} MRU</p>
-          </div>
-        </div>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4">
+      <div className="w-full max-w-lg rounded-[2.5rem] bg-white shadow-2xl overflow-hidden min-h-[400px] flex flex-col justify-center transition-all duration-500">
+        
+        {!isSuccess ? (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Header */}
+            <div className="relative p-8 border-b border-slate-50 bg-slate-50/30">
+              <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white hover:bg-red-50 hover:text-red-500 rounded-xl shadow-sm border border-slate-100 transition-all text-slate-400">
+                <X size={20} />
+              </button>
+              
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+                  <User size={24} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 tracking-tight">Nouvelle Réservation</h2>
+                  <p className="text-sm text-slate-500 font-medium">Saisie secrétariat</p>
+                </div>
+              </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <div className="rounded-xl bg-red-50 border border-red-200 p-4 flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-700">{error}</p>
+              <div className="mt-6 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><Calendar size={16}/></div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-900 leading-tight">{consultation.doctor_name}</p>
+                    <p className="text-[11px] text-slate-400 font-medium">
+                       {new Date(consultation.date_fin).toLocaleDateString("fr-FR", { weekday: 'short', day: 'numeric', month: 'short' })}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-black text-indigo-600">{consultation.montant} MRU</p>
+                </div>
+              </div>
             </div>
-          )}
 
-          {/* Nom complet */}
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <User className="h-4 w-4 text-blue-600" />
-              Nom complet du patient
-            </label>
-            <input
-              type="text"
-              name="nomComplet_patient"
-              value={formData.nomComplet_patient}
-              onChange={handleChange}
-              placeholder="Ahmed Mohamed Ali"
-              className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50/50 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all"
-              required
-            />
+            {/* Formulaire */}
+            <form onSubmit={handleSubmit} className="p-8 space-y-5">
+              {error && (
+                <div className="rounded-2xl bg-red-50 border border-red-100 p-4 flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-500" />
+                  <p className="text-xs font-bold text-red-600">{error}</p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom du patient</label>
+                  <div className="relative group">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-300 group-focus-within:text-indigo-600 transition-colors" />
+                    <input type="text" name="nomComplet_patient" value={formData.nomComplet_patient} onChange={handleChange} required placeholder="Nom complet" className="w-full pl-12 pr-4 py-4 rounded-2xl bg-slate-50 border-none text-sm font-semibold focus:ring-2 focus:ring-indigo-500/10 focus:bg-white outline-none transition-all" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">WhatsApp</label>
+                    <input type="tel" name="numero_tel_patient" value={formData.numero_tel_patient} onChange={handleChange} required placeholder="4x xx xx xx" className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none text-sm font-semibold focus:ring-2 focus:ring-indigo-500/10 focus:bg-white outline-none transition-all" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">NNI</label>
+                    <input type="text" name="numero_reservation" value={formData.numero_reservation} onChange={handleChange} required placeholder="13 chiffres" className="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none text-sm font-semibold focus:ring-2 focus:ring-indigo-500/10 focus:bg-white outline-none transition-all" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button type="button" onClick={onClose} className="flex-1 px-6 py-4 rounded-2xl bg-slate-50 text-slate-500 font-bold text-sm hover:bg-slate-100 transition-all">Annuler</button>
+                <button type="submit" disabled={loading} className="flex-[2] px-6 py-4 rounded-2xl bg-slate-900 text-white font-bold text-sm hover:bg-indigo-600 shadow-xl transition-all flex items-center justify-center gap-2">
+                  {loading ? <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div> : "Valider"}
+                </button>
+              </div>
+            </form>
           </div>
-
-          {/* Téléphone */}
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <Phone className="h-4 w-4 text-blue-600" />
-              Numéro WhatsApp
-            </label>
-            <input
-              type="tel"
-              name="numero_tel_patient"
-              value={formData.numero_tel_patient}
-              onChange={handleChange}
-              placeholder="+22226123456"
-              className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50/50 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all"
-              required
-            />
-          </div>
-
-          {/* NNI */}
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <FileText className="h-4 w-4 text-blue-600" />
-              Numéro NNI
-            </label>
-            <input
-              type="text"
-              name="numero_reservation"
-              value={formData.numero_reservation}
-              onChange={handleChange}
-              placeholder="Entrez le numéro NNI"
-              className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50/50 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all"
-              required
-            />
-          </div>
-
-          {/* Info */}
-          <div className="rounded-xl bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 p-3 flex items-start gap-3">
-            <AlertCircle className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-blue-900">Places: {consultation.n_places}</p>
-              <p className="text-xs text-blue-700">Réservation automatique</p>
+        ) : (
+          /* --- ÉCRAN DE SUCCÈS ANIMÉ --- */
+          <div className="p-12 text-center animate-in zoom-in-95 duration-500">
+            <div className="relative mx-auto w-24 h-24 mb-6">
+               <div className="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-25"></div>
+               <div className="relative bg-emerald-500 text-white w-24 h-24 rounded-full flex items-center justify-center shadow-lg shadow-emerald-200">
+                  <CheckCircle2 size={48} strokeWidth={3} />
+               </div>
+            </div>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-2">Réservation Confirmée !</h2>
+            <p className="text-slate-500 font-medium">Le patient a été ajouté avec succès à la liste d'attente.</p>
+            <div className="mt-8 flex justify-center">
+               <div className="px-4 py-2 bg-slate-50 rounded-full border border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  Fermeture automatique...
+               </div>
             </div>
           </div>
-
-          {/* Buttons */}
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-3 rounded-xl bg-gradient-to-r from-[#1a365d] to-[#2b6cb0] text-white font-semibold hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/25"
-            >
-              {loading ? "En cours..." : "Réserver"}
-            </button>
-          </div>
-        </form>
+        )}
       </div>
     </div>
   );

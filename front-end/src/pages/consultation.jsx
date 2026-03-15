@@ -1,229 +1,259 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
+import {
+  Camera, FileText, Calendar as CalIcon,
+  Clock, X, Users, ShieldCheck, Wallet
+} from "lucide-react";
+import { useLocation } from "react-router-dom";
 
-const API_BASE_URL = "http://127.0.0.1:8000/api"; 
+const API_BASE_URL = "http://127.0.0.1:8000/api";
+const MEDIA_BASE_URL = "http://127.0.0.1:8000";
 
-function DoctorConsultationBlock({ doctorData, consultationsTemp, onBookingSuccess }) {
+// --- TIMER assorti ---
+const CountdownTimer = ({ initialMinutes, onExpire }) => {
+  const [seconds, setSeconds] = useState(initialMinutes * 60);
+
+  useEffect(() => {
+    if (seconds <= 0) {
+      onExpire();
+      return;
+    }
+    const timer = setInterval(() => setSeconds(s => s - 1), 1000);
+    return () => clearInterval(timer);
+  }, [seconds, onExpire]);
+
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-[#1a365d] rounded-full text-xs font-medium border border-[#2b6cb0]/20">
+      <div className="w-1.5 h-1.5 bg-[#1a365d] rounded-full animate-pulse" />
+      {mins}:{secs < 10 ? `0${secs}` : secs}
+    </div>
+  );
+};
+
+// --- DOCTOR CARD aux couleurs du header ---
+function DoctorCard({ doctor, consultations, onBookingSuccess }) {
   const [selectedDate, setSelectedDate] = useState(null);
-  const [selectedConsultation, setSelectedConsultation] = useState(null);
+  const [selectedSlot, setSelectedSlot] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [paymentInfo, setPaymentInfo] = useState(null);
 
-  const [formData, setFormData] = useState({
-    nomComplet_patient: "",
-    numero_tel_patient: "",
-    photo_nni: null,
-    capture_paiement: null,
-  });
+  const [nomComplet, setNomComplet] = useState("");
+  const [phone, setPhone] = useState("");
+  const [fileNNI, setFileNNI] = useState(null);
+  const [filePaiement, setFilePaiement] = useState(null);
 
-  const availableConsultations = useMemo(() => {
+  const dailySlots = useMemo(() => {
     if (!selectedDate) return [];
-    return consultationsTemp.filter((c) => {
-      const cDate = new Date(c.date_fin);
-      return c.doctor_name === doctorData.doctor_name && cDate.toDateString() === selectedDate.toDateString();
-    });
-  }, [selectedDate, consultationsTemp, doctorData.doctor_name]);
+    return consultations.filter(c =>
+      c.doctor_name === doctor.doctor_name &&
+      new Date(c.date_fin).toDateString() === selectedDate.toDateString()
+    );
+  }, [selectedDate, consultations, doctor.doctor_name]);
 
-  const handleChange = (e) => {
-    const { name, value, type, files } = e.target;
-    setFormData({ ...formData, [name]: type === "file" ? files[0] : value });
-  };
-
-  const handleOpenBooking = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch(`${API_BASE_URL}/open-window/${selectedConsultation.id}/`, { method: "POST" });
-      const result = await res.json();
-      if (result.ok) {
-        setPaymentInfo(result.data);
-        setIsModalOpen(true);
-      } else { alert(result.error); }
-    } catch { alert("Erreur serveur"); } finally { setLoading(false); }
+  const handleOpenBooking = () => {
+    if (selectedSlot) setIsModalOpen(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!fileNNI || !filePaiement) {
+      alert("Veuillez charger les deux documents requis.");
+      return;
+    }
+
     setLoading(true);
     const data = new FormData();
-    data.append("nomComplet_patient", formData.nomComplet_patient);
-    data.append("numero_tel_patient", formData.numero_tel_patient);
-    data.append("photo_nni", formData.photo_nni);
-    data.append("capture_paiement", formData.capture_paiement);
+    data.append("nomComplet_patient", nomComplet);
+    data.append("numero_tel_patient", phone);
+    data.append("photo_nni", fileNNI);
+    data.append("capture_paiement", filePaiement);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/pay-consultation/${selectedConsultation.id}/`, { method: "POST", body: data });
+      const res = await fetch(`${API_BASE_URL}/pay-consultation/${selectedSlot.id}/`, {
+        method: "POST",
+        body: data
+      });
       const result = await res.json();
-      if (result.ok) {
-        alert("Réservation réussie !");
+
+      if (res.ok && (result.ok || result.status === "success")) {
+        alert("✅ Réservation réussie ! Votre dossier est en cours d'analyse.");
         setIsModalOpen(false);
         onBookingSuccess();
-      } else { alert(result.error); }
-    } catch { alert("Erreur d'envoi"); } finally { setLoading(false); }
+      } else {
+        alert("❌ " + (result.message || "Erreur lors de la validation du paiement."));
+      }
+    } catch (err) {
+      alert("❌ Erreur de connexion au serveur.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <article className="relative grid grid-cols-1 lg:grid-cols-[0.8fr_2fr] gap-2 mb-6 overflow-hidden bg-white rounded-2xl shadow-lg border border-slate-100 hover:shadow-xl transition-all duration-300">
-      {/* Badge disponibilité - Plus petit sur mobile */}
-      <span className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/90 backdrop-blur-sm px-3 py-1 text-[10px] font-bold text-white shadow-sm">
-        <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-        En ligne
-      </span>
-
-      {/* Bloc médecin - Compact */}
-      <div className="flex flex-col items-center justify-center p-5 text-center bg-slate-50/50 border-b lg:border-b-0 lg:border-r border-slate-100">
-        <div className="relative mb-3">
-          <img
-            src={doctorData.doctor_photo || "https://via.placeholder.com/150"}
-            alt={doctorData.doctor_name}
-            className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl object-cover ring-2 ring-white shadow-md"
-          />
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 leading-tight">{doctorData.doctor_name}</h2>
-          <p className="mt-1 text-[11px] font-semibold text-sky-600 bg-sky-50 px-3 py-0.5 rounded-full inline-block ring-1 ring-sky-100">
-            {doctorData.doctor_specialite}
-          </p>
-        </div>
-        
-        <div className="mt-4 w-full grid grid-cols-2 lg:grid-cols-1 gap-2">
-            <div className="flex items-center justify-between p-2 rounded-xl bg-white border border-slate-100">
-                <span className="text-[10px] text-slate-500 uppercase">Vidéo</span>
-                <svg className="w-3 h-3 text-sky-500" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" /></svg>
+    <div className="bg-white rounded-3xl border border-[#2b6cb0]/20 shadow-lg p-6 mb-6 transition hover:shadow-xl">
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Infos docteur */}
+        <div className="lg:w-1/4 text-center lg:text-left">
+          <div className="relative inline-block mb-4">
+            <img
+              src={doctor.doctor_photo ? (doctor.doctor_photo.startsWith('http') ? doctor.doctor_photo : `${MEDIA_BASE_URL}${doctor.doctor_photo}`) : "https://via.placeholder.com/150"}
+              className="w-24 h-24 rounded-2xl object-cover ring-4 ring-[#2b6cb0]/20"
+              alt={doctor.doctor_name}
+            />
+            <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white p-1.5 rounded-xl border-2 border-white shadow">
+              <ShieldCheck size={16} />
             </div>
-            <div className="flex items-center justify-between p-2 rounded-xl bg-white border border-slate-100">
-                <span className="text-[10px] text-emerald-600 font-bold uppercase">Bankily</span>
-                <svg className="w-3 h-3 text-emerald-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10v2a2 2 0 002 2h2a2 2 0 002-2V6a2 2 0 00-2-2h-2V3a1 1 0 10-2 0v1h-3V3a1 1 0 10-2 0v1H7V3a1 1 0 00-2 0v1H4z" clipRule="evenodd" /></svg>
-            </div>
-        </div>
-      </div>
+          </div>
+          <h2 className="text-lg font-semibold text-[#1a365d]">{doctor.doctor_name}</h2>
+          <p className="text-[#2b6cb0] text-xs uppercase tracking-wide mt-1">{doctor.doctor_specialite}</p>
 
-      {/* Calendrier + créneaux - Grid Responsive */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 lg:p-6">
-        {/* Partie Calendrier */}
-        <div className="space-y-3">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">1. Choisir la date</p>
-          <div className="calendar-container rounded-xl overflow-hidden border border-slate-200 shadow-inner bg-white">
+          <div className="mt-6 space-y-2 text-xs text-gray-500">
+            <div className="flex items-center gap-2">
+              <Wallet size={14} className="text-[#2b6cb0]" /> Bankily / Masrivi
+            </div>
+            <div className="flex items-center gap-2">
+              <Users size={14} className="text-[#2b6cb0]" /> Places limitées
+            </div>
+          </div>
+        </div>
+
+        {/* Calendrier et créneaux */}
+        <div className="lg:flex-1 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="custom-calendar-container">
+            <p className="text-xs font-medium text-[#1a365d] uppercase tracking-wide mb-3 flex items-center gap-1">
+              <CalIcon size={14} /> 1. Date
+            </p>
             <Calendar
               onChange={setSelectedDate}
               value={selectedDate}
-              tileClassName={({ date }) => {
-                const hasSlots = consultationsTemp.some(
-                  (c) =>
-                    c.doctor_name === doctorData.doctor_name &&
-                    new Date(c.date_fin).toDateString() === date.toDateString() &&
-                    c.n_places > 0
-                );
-                return hasSlots ? "react-calendar__tile--available" : "";
-              }}
+              tileClassName={({ date }) =>
+                consultations.some(c => c.doctor_name === doctor.doctor_name && new Date(c.date_fin).toDateString() === date.toDateString())
+                  ? "has-avail" : null
+              }
             />
           </div>
-        </div>
 
-        {/* Partie Créneaux */}
-        <div className="flex flex-col h-full space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">2. Créneaux</p>
-            {selectedDate && (
-                <span className="text-[10px] font-bold text-sky-600">
-                    {selectedDate.toLocaleDateString('fr-FR', {day:'numeric', month:'short'})}
-                </span>
-            )}
-          </div>
-
-          <div className="flex-1 space-y-2 overflow-y-auto max-h-[220px] md:max-h-full pr-1 custom-scrollbar">
-            {!selectedDate ? (
-              <div className="h-full flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-100 py-8 px-4 text-center">
-                <p className="text-xs text-slate-400">Sélectionnez une date</p>
-              </div>
-            ) : availableConsultations.length === 0 ? (
-              <div className="h-full flex items-center justify-center p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-xl">
-                Aucun créneau disponible.
-              </div>
-            ) : (
-              availableConsultations.map((c) => (
+          <div className="flex flex-col">
+            <p className="text-xs font-medium text-[#1a365d] uppercase tracking-wide mb-3 flex items-center gap-1">
+              <Clock size={14} /> 2. Créneaux
+            </p>
+            <div className="space-y-2 overflow-y-auto max-h-[240px] pr-1">
+              {dailySlots.map(s => (
                 <button
-                  type="button"
-                  key={c.id}
-                  disabled={c.n_places <= 0}
-                  onClick={() => setSelectedConsultation(c)}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all ${
-                    selectedConsultation?.id === c.id
-                      ? "border-sky-500 bg-sky-50 shadow-sm"
-                      : "border-slate-50 bg-white hover:border-slate-200"
-                  } ${c.n_places <= 0 ? "opacity-40" : "active:scale-95"}`}
+                  key={s.id}
+                  onClick={() => setSelectedSlot(s)}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl border transition ${
+                    selectedSlot?.id === s.id
+                      ? 'bg-[#1a365d] border-[#1a365d] text-white'
+                      : 'bg-[#e6f0fa] border-[#2b6cb0]/20 hover:bg-[#d4e4f5]'
+                  }`}
                 >
-                  <span className="font-black text-slate-800 text-sm">
-                    {new Date(c.date_fin).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  <span className="font-medium text-sm">
+                    {new Date(s.date_fin).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
-                  <span className="text-xs font-bold text-sky-600">{c.montant} MRU</span>
+                  <span className={`text-xs px-2 py-1 rounded-lg ${
+                    selectedSlot?.id === s.id ? 'bg-[#2b6cb0]' : 'bg-white text-[#1a365d] border border-[#2b6cb0]/30'
+                  }`}>
+                    {s.places_restantes || "5"} pl.
+                  </span>
                 </button>
-              ))
-            )}
+              ))}
+              {dailySlots.length === 0 && (
+                <p className="text-center py-6 text-gray-400 text-sm">Aucun créneau</p>
+              )}
+            </div>
+            <button
+              disabled={!selectedSlot}
+              onClick={handleOpenBooking}
+              className="mt-4 w-full bg-gradient-to-r from-[#1a365d] to-[#2b6cb0] text-white py-3 rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-30 transition shadow-sm"
+            >
+              Réserver
+            </button>
           </div>
-
-          <button
-            disabled={!selectedConsultation || loading}
-            onClick={handleOpenBooking}
-            className="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-sky-600 disabled:opacity-20 transition-all active:scale-95 shadow-lg shadow-slate-200"
-          >
-            {loading ? "Chargement..." : "Réserver"}
-          </button>
         </div>
       </div>
 
-      {/* Modal Responsive */}
-      {isModalOpen && paymentInfo && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-white rounded-t-[2rem] sm:rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
-            <div className="bg-emerald-600 p-5 text-white flex justify-between items-center">
-                <div>
-                    <p className="text-[10px] uppercase font-bold opacity-80">Paiement Bankily</p>
-                    <h3 className="text-lg font-bold leading-tight">{paymentInfo.receiver}</h3>
-                </div>
-                <button onClick={() => setIsModalOpen(false)} className="bg-white/10 p-2 rounded-full hover:bg-white/20">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
-              <div className="grid grid-cols-1 gap-4 text-left">
-                <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Patient</label>
-                    <input type="text" name="nomComplet_patient" required onChange={handleChange}
-                        className="w-full mt-1 bg-slate-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500" />
-                </div>
-                <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">WhatsApp</label>
-                    <input type="tel" name="numero_tel_patient" required onChange={handleChange}
-                        className="w-full mt-1 bg-slate-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500" />
-                </div>
+      {/* MODAL COMPACTE aux couleurs du header */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden">
+            <div className="relative p-5 bg-gradient-to-r from-[#1a365d] to-[#2b6cb0] flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <CountdownTimer initialMinutes={5} onExpire={() => setIsModalOpen(false)} />
+                <span className="text-xs text-blue-200">Sécurisé</span>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="flex flex-col items-center p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-emerald-500 cursor-pointer transition">
-                  <span className="text-[10px] font-bold text-slate-500">NNI</span>
-                  <input type="file" name="photo_nni" required onChange={handleChange} className="hidden" />
-                </label>
-                <label className="flex flex-col items-center p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-emerald-500 cursor-pointer transition">
-                  <span className="text-[10px] font-bold text-slate-500">Reçu</span>
-                  <input type="file" name="capture_paiement" required onChange={handleChange} className="hidden" />
-                </label>
-              </div>
-
-              <button type="submit" disabled={loading}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold text-sm hover:bg-emerald-700 transition shadow-lg shadow-emerald-100">
-                Confirmer {selectedConsultation?.montant} MRU
+              <button onClick={() => setIsModalOpen(false)} className="p-1.5 hover:bg-white/20 rounded-lg">
+                <X size={18} className="text-white" />
               </button>
-            </form>
+            </div>
+
+            <div className="p-5">
+              <p className="text-sm text-gray-500 mb-4">
+                {new Date(selectedSlot?.date_fin).toLocaleString()}
+              </p>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 gap-3">
+                  <input
+                    type="text" placeholder="Nom complet" required
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#2b6cb0]"
+                    onChange={e => setNomComplet(e.target.value)}
+                  />
+                  <input
+                    type="tel" placeholder="Téléphone (WhatsApp)" required
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#2b6cb0]"
+                    onChange={e => setPhone(e.target.value)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className={`flex flex-col items-center p-3 border border-dashed rounded-lg cursor-pointer transition ${
+                    fileNNI ? 'bg-blue-50 border-[#2b6cb0]' : 'border-gray-300 hover:bg-blue-50'
+                  }`}>
+                    <Camera size={20} className={fileNNI ? 'text-[#1a365d]' : 'text-gray-400'} />
+                    <span className="text-[10px] font-medium mt-1">{fileNNI ? "NNI" : "Photo NNI"}</span>
+                    <input type="file" className="hidden" accept="image/*" required onChange={e => setFileNNI(e.target.files[0])} />
+                  </label>
+                  <label className={`flex flex-col items-center p-3 border border-dashed rounded-lg cursor-pointer transition ${
+                    filePaiement ? 'bg-blue-50 border-[#2b6cb0]' : 'border-gray-300 hover:bg-blue-50'
+                  }`}>
+                    <FileText size={20} className={filePaiement ? 'text-[#1a365d]' : 'text-gray-400'} />
+                    <span className="text-[10px] font-medium mt-1">{filePaiement ? "Reçu" : "Reçu Bankily"}</span>
+                    <input type="file" className="hidden" accept="image/*" required onChange={e => setFilePaiement(e.target.files[0])} />
+                  </label>
+                </div>
+
+                <div className="bg-gradient-to-r from-[#1a365d]/10 to-[#2b6cb0]/10 p-4 rounded-lg flex items-center gap-3 border border-[#2b6cb0]/20">
+                  <div className="bg-gradient-to-r from-[#1a365d] to-[#2b6cb0] p-2 rounded-lg text-white">
+                    <Wallet size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#1a365d]">Montant à payer</p>
+                    <p className="text-lg font-semibold text-gray-800">{selectedSlot?.montant || "500"} MRU</p>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-[#1a365d] to-[#2b6cb0] text-white rounded-lg font-medium hover:opacity-90 disabled:opacity-50 text-sm shadow-sm"
+                >
+                  {loading ? "Traitement..." : "Confirmer la réservation"}
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       )}
-    </article>
+    </div>
   );
 }
 
+// --- PAGE PRINCIPALE ---
 export default function Consultation() {
   const [consultations, setConsultations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -232,63 +262,92 @@ export default function Consultation() {
     fetch(`${API_BASE_URL}/consultations/`)
       .then(res => res.json())
       .then(result => {
-        const data = result.data || result; 
-        if (Array.isArray(data)) setConsultations(data);
+        const data = result.data || result;
+        if (Array.isArray(data)) {
+          setConsultations(data.sort((a, b) => new Date(a.date_fin) - new Date(b.date_fin)));
+        }
       })
-      .catch(err => console.error(err))
+      .catch(() => alert("Erreur lors de la récupération des données"))
       .finally(() => setLoading(false));
   }, []);
 
-  const uniqueDoctors = useMemo(() => {
-    return Array.from(new Set(consultations.map(c => c.doctor_name)))
-      .map(name => {
-        const info = consultations.find(c => c.doctor_name === name);
-        return {
-          doctor_name: name,
-          doctor_specialite: info.doctor_specialite,
-          doctor_photo: info.doctor_photo
-        };
-      });
+  const doctors = useMemo(() => {
+    const doctorsMap = new Map();
+    consultations.forEach(c => {
+      if (!doctorsMap.has(c.doctor_name)) {
+        doctorsMap.set(c.doctor_name, {
+          doctor_name: c.doctor_name,
+          doctor_specialite: c.doctor_specialite,
+          doctor_photo: c.doctor_photo || c.photo
+        });
+      }
+    });
+    return Array.from(doctorsMap.values());
   }, [consultations]);
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:py-12">
-        <header className="mb-8 text-center space-y-3">
-          <span className="inline-block px-4 py-1 bg-white rounded-full text-[10px] font-black uppercase tracking-tighter text-sky-600 shadow-sm border border-slate-100">Booking Santé</span>
-          <h1 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight">Consultation Rapide</h1>
-          <p className="max-w-md mx-auto text-xs sm:text-sm text-slate-500">Réservez votre créneau vidéo en quelques secondes.</p>
+    <div className="min-h-screen bg-gradient-to-br from-[#e6f0fa] to-white py-12 px-4">
+      <div className="max-w-5xl mx-auto">
+        <header className="mb-10 text-center">
+          <h1 className="text-3xl font-light text-[#1a365d] tracking-tight">
+            e-santé Mauritanie
+          </h1>
+          <p className="text-[#2b6cb0]/70 text-sm mt-2 max-w-xl mx-auto">
+            Consultation médicale à distance. Choisissez votre spécialiste et réservez en ligne.
+          </p>
         </header>
 
         {loading ? (
-          <div className="mt-20 flex flex-col items-center"><div className="w-8 h-8 border-4 border-sky-100 border-t-sky-500 rounded-full animate-spin"></div></div>
-        ) : uniqueDoctors.length > 0 ? (
-          <div className="space-y-4">
-            {uniqueDoctors.map((doc) => (
-              <DoctorConsultationBlock
-                key={doc.doctor_name}
-                doctorData={doc}
-                consultationsTemp={consultations}
-                onBookingSuccess={() => window.location.reload()}
-              />
-            ))}
+          <div className="flex justify-center py-20">
+            <div className="w-8 h-8 border-2 border-[#2b6cb0]/30 border-t-[#1a365d] rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="text-center p-12 bg-white rounded-3xl border border-dashed border-slate-200 text-slate-400 text-sm font-medium">
-            Aucun médecin disponible.
+          <div className="space-y-4">
+            {doctors.length > 0 ? (
+              doctors.map(doc => (
+                <DoctorCard
+                  key={doc.doctor_name}
+                  doctor={doc}
+                  consultations={consultations}
+                  onBookingSuccess={() => window.location.reload()}
+                />
+              ))
+            ) : (
+              <div className="text-center py-16 bg-white rounded-2xl border border-[#2b6cb0]/20">
+                <p className="text-[#2b6cb0]/60 text-sm">Aucun spécialiste disponible</p>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      <style dangerouslySetInnerHTML={{ __html: `
-        .react-calendar { width: 100% !important; border: none !important; font-family: inherit !important; font-size: 0.75rem !important; }
-        .react-calendar__tile--available { background: #f0fdf4 !important; color: #16a34a !important; font-weight: bold !important; border-radius: 8px !important; }
-        .react-calendar__tile--active { background: #0ea5e9 !important; border-radius: 8px !important; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-        @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        .animate-slide-up { animation: slide-up 0.3s ease-out; }
-      `}} />
+      <style>{`
+        .custom-calendar-container .react-calendar {
+          border: none;
+          font-family: inherit;
+          width: 100%;
+          background: transparent;
+        }
+        .custom-calendar-container .react-calendar__navigation button {
+          font-size: 0.75rem;
+          color: #1a365d;
+        }
+        .custom-calendar-container .react-calendar__tile {
+          padding: 0.5rem;
+          border-radius: 0.5rem;
+          font-size: 0.75rem;
+          color: #6b7280;
+        }
+        .custom-calendar-container .has-avail {
+          background: #d4e4f5 !important;
+          color: #1a365d !important;
+          font-weight: 500;
+        }
+        .custom-calendar-container .react-calendar__tile--active {
+          background: #2b6cb0 !important;
+          color: white !important;
+        }
+      `}</style>
     </div>
   );
 }

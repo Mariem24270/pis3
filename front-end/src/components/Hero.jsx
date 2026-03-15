@@ -75,7 +75,7 @@ const Home = () => {
 
               <div className="relative z-10 group">
                 <img 
-                  src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=800" 
+                  src="https://img.freepik.com/photos-gratuite/portrait-professionnel-sante-posant-pour-photo-bras-croises_1098-19293.jpg?semt=ais_hybrid&w=740&q=80" 
                   alt="Docteur souriant" 
                   className="w-[320px] h-[380px] lg:w-[420px] lg:h-[480px] object-cover shadow-2xl border-[6px] border-white"
                   style={{ borderRadius: '60% 40% 30% 70% / 60% 30% 70% 40%' }} 

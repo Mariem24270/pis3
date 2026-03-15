@@ -1,24 +1,16 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Hospital, Lock, User, Shield, Stethoscope } from "lucide-react";
-import { API_BASE_URL } from "../api/config";
+import { Lock, User, ShieldCheck, ArrowRight, Loader2, ArrowLeft, Stethoscope, HelpCircle } from "lucide-react";
+// Importez API_BASE_URL directement comme dans votre ancien code qui marchait
+import { API_BASE_URL } from "../api/config"; 
 
 export default function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const navigate = useNavigate();
-
-  const meta = useMemo(
-    () => ({
-      title: "Connexion",
-      subtitle: "Entrez vos identifiants. La redirection dépend de votre rôle.",
-      icon: Shield,
-      accent: "from-emerald-600 to-teal-600",
-    }),
-    [],
-  );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -26,6 +18,7 @@ export default function Login({ onLoginSuccess }) {
     setLoading(true);
 
     try {
+      // On utilise le format exact de votre ancien code qui fonctionnait
       const res = await fetch(`${API_BASE_URL}/token/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -35,7 +28,8 @@ export default function Login({ onLoginSuccess }) {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || data.username?.[0] || data.password?.[0] || "Identifiants incorrects");
+        setLoading(false); // On arrête le chargement immédiatement si erreur
+        setError(data.detail || "Identifiants incorrects");
         return;
       }
 
@@ -43,114 +37,134 @@ export default function Login({ onLoginSuccess }) {
         localStorage.setItem("token", data.access);
         if (data.refresh) localStorage.setItem("refreshToken", data.refresh);
 
-        // Récupérer le rôle réel depuis le backend
         const meRes = await fetch(`${API_BASE_URL}/me/`, {
           headers: { Authorization: `Bearer ${data.access}` },
         });
+        
         const me = await meRes.json();
-        let backendRole = me?.role; // admin | secretary | secretaire | doctor | unknown
+        let backendRole = me?.role;
 
-        // Normaliser les libellés renvoyés par le backend
         if (backendRole === "secretaire") backendRole = "secretary";
 
         if (!backendRole || backendRole === "unknown") {
+          setLoading(false);
           setError("Rôle utilisateur introuvable.");
-          localStorage.removeItem("token");
-          localStorage.removeItem("refreshToken");
           return;
         }
 
         localStorage.setItem("userRole", backendRole);
-
         onLoginSuccess?.(me);
 
         // Redirection
         if (backendRole === "admin") navigate("/admin");
         else if (backendRole === "secretary") navigate("/secretaire");
         else navigate("/docteur");
-      } else {
-        setError("Réponse serveur invalide");
       }
-    } catch {
-      setError("Erreur de connexion. Vérifiez que le backend est démarré.");
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      setLoading(false); // On arrête le chargement en cas de crash réseau
+      setError("Le serveur ne répond pas. Vérifiez que le backend est lancé.");
     }
   };
 
   return (
-    <div className="min-h-[calc(100vh-80px)] bg-gradient-to-br from-slate-50 via-sky-50/50 to-emerald-50/60 flex items-center">
-      <div className="mx-auto w-full max-w-md px-4 py-10">
-          <section className="rounded-3xl bg-white p-7 sm:p-10 shadow-xl ring-1 ring-slate-200/70">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Connexion
-                </p>
-                <h2 className="mt-1 text-2xl font-bold text-slate-900">
-                  Bienvenue
-                </h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Entrez vos identifiants pour continuer.
-                </p>
+    <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4 relative">
+      
+      {/* Bouton retour */}
+      <button 
+        onClick={() => navigate("/")}
+        className="absolute top-6 left-6 flex items-center gap-2 text-slate-500 hover:text-[#1a365d] transition-colors font-semibold text-sm group"
+      >
+        <ArrowLeft className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
+        Retour
+      </button>
+
+      <div className="w-full max-w-5xl bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col md:flex-row">
+        
+        {/* Panneau Bleu */}
+        <div className="md:w-[40%] bg-gradient-to-br from-[#1a365d] to-[#2b6cb0] p-10 text-white flex flex-col justify-between">
+          <div>
+            <div className="bg-white/10 w-fit p-3 rounded-2xl backdrop-blur-md mb-8">
+              <ShieldCheck className="h-7 w-7 text-blue-200" />
+            </div>
+            <h2 className="text-4xl font-bold leading-tight">Portail <br/> Administratif</h2>
+            <p className="mt-4 text-blue-100/70">Espace réservé au personnel autorisé.</p>
+          </div>
+          
+          <div className="bg-white/5 border border-white/10 p-5 rounded-2xl mt-8">
+            <p className="text-xs text-blue-100/60 leading-relaxed">
+              En cas d'oubli, contactez <strong>l'administrateur principal</strong> pour réinitialiser vos accès.
+            </p>
+          </div>
+        </div>
+
+        {/* Panneau Formulaire */}
+        <div className="md:w-[60%] p-10 lg:p-16 bg-white">
+          <div className="max-w-[360px] mx-auto">
+            <div className="mb-10">
+              <div className="bg-blue-50 w-12 h-12 rounded-xl flex items-center justify-center mb-6 border border-blue-100">
+                <Stethoscope className="h-6 w-6 text-[#2b6cb0]" />
               </div>
-              <div className={`h-12 w-12 rounded-2xl bg-gradient-to-br ${meta.accent} text-white shadow-lg flex items-center justify-center`}>
-                {React.createElement(meta.icon, { className: "h-6 w-6" })}
-              </div>
+              <h3 className="text-3xl font-bold text-slate-900">Connexion</h3>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               {error && (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm font-medium animate-pulse">
                   {error}
                 </div>
               )}
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700">Nom d’utilisateur</label>
-                <div className="flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-slate-50 px-3 py-3 focus-within:border-sky-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-sky-100">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Utilisateur</label>
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 focus-within:border-[#2b6cb0] focus-within:bg-white transition-all">
                   <User className="h-5 w-5 text-slate-400" />
                   <input
-                    className="w-full bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"
+                    className="w-full bg-transparent outline-none text-sm font-medium"
                     type="text"
-                    placeholder="Ex: admin_principal"
+                    placeholder="Identifiant"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     required
-                    autoComplete="username"
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700">Mot de passe</label>
-                <div className="flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-slate-50 px-3 py-3 focus-within:border-sky-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-sky-100">
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Mot de passe</label>
+                  <button type="button" onClick={() => setShowHelp(!showHelp)} className="text-[11px] font-bold text-blue-600 hover:underline">Oublié ?</button>
+                </div>
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 focus-within:border-[#2b6cb0] focus-within:bg-white transition-all">
                   <Lock className="h-5 w-5 text-slate-400" />
                   <input
-                    className="w-full bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"
+                    className="w-full bg-transparent outline-none text-sm font-medium"
                     type="password"
-                    placeholder="Votre mot de passe"
+                    placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    autoComplete="current-password"
                   />
                 </div>
               </div>
+
+              {showHelp && (
+                <div className="p-3 rounded-lg bg-blue-50 border border-blue-100 text-[11px] text-blue-800 flex items-center gap-2">
+                  <HelpCircle className="h-4 w-4" />
+                  Contactez l'administrateur principal pour réinitialiser votre accès.
+                </div>
+              )}
 
               <button
                 type="submit"
                 disabled={loading}
-                className={`w-full rounded-xl bg-gradient-to-r ${meta.accent} px-4 py-3.5 text-sm font-bold text-white shadow-lg transition hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99]`}
+                className="w-full rounded-2xl bg-[#1a365d] py-4 text-white font-bold text-sm shadow-lg hover:bg-[#2b6cb0] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {loading ? "Connexion..." : "Connexion"}
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Accéder au Dashboard"}
+                {!loading && <ArrowRight className="h-4 w-4" />}
               </button>
-
-              <p className="text-center text-xs text-slate-400">
-                Besoin d’aide ? Contactez l’administrateur principal.
-              </p>
             </form>
-          </section>
+          </div>
+        </div>
       </div>
     </div>
   );

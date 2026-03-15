@@ -5,7 +5,7 @@ from .models import ConsultationTemporaire, ConsultationPaye, Doctor, Secreteur,
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username']
+        fields = ['id', 'username', 'email']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False}
         }
@@ -17,8 +17,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'password': {'write_only': True}
         }
-    
+
     def create(self, validated_data):
+        
         user = User.objects.create_user(**validated_data)
         return user
 
@@ -194,21 +195,21 @@ class ConsultationTemporaireSerializer(serializers.ModelSerializer):
 
 
 class ConsultationPayeSerializer(serializers.ModelSerializer):
-    doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
+    # On utilise un SerializerMethodField pour être sûr d'avoir un nom à afficher
+    doctor_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ConsultationPaye
         fields = ['id', 'nom_complet', 'numero_tel', 'date', 'NNI',
-                 'doctor', 'doctor_name', 'specialite', 'diagnostic', 'temporaire_id', 'numero_reservation']
-        extra_kwargs = {
-            'diagnostic': {'required': False},
-            'temporaire_id':{'write_only':True, 'required':True},
-            'numero_reservation': {'read_only': False},
-            'doctor': {'read_only': True},
-            'date': {'read_only': False},
-            'NNI': {'required': True},
-            'specialite': {'required':False}
-        }
+                 'doctor', 'doctor_name', 'specialite', 'diagnostic', 'temporaire_id', 'numero_reservation', 'montant']
+        # ... (le reste de tes kwargs ne change pas)
+
+    def get_doctor_name(self, obj):
+        if obj.doctor and obj.doctor.user:
+            # Si le nom complet existe, on le prend, sinon on prend le username
+            full_name = obj.doctor.user.get_full_name()
+            return full_name if full_name else obj.doctor.user.username
+        return "Médecin inconnu"
     
 
 

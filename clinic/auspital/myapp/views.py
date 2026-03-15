@@ -412,64 +412,46 @@ def pay_consultation(request, consultation_id):
 
 
 @api_view(["POST"])
-@parser_classes([MultiPartParser, FormParser])
+@permission_classes([IsAuthenticated])
 def secretary_reservation(request, consultation_id):
-    """
-    Endpoint pour les secrétaires pour réserver une consultation sans paiement
-    """
     nettoyer_consultations()
-
     c = get_object_or_404(ConsultationTemporaire, id=consultation_id)
 
     if c.n_places <= 0:
-        c.delete()
-        return err("Plus de places disponibles.", status.HTTP_409_CONFLICT)
+        return Response({"error": "Plus de places disponibles"}, status=409)
 
     ser = SecretaryReservationSerializer(data=request.data)
     if not ser.is_valid():
-        return err("Données invalides.", details=ser.errors)
+        return Response({"error": "Données invalides", "details": ser.errors}, status=400)
 
-    with transaction.atomic():
-        locked = ConsultationTemporaire.objects.select_for_update().get(id=c.id)
+    try:
+        with transaction.atomic():
+            # On récupère la consultation
+            locked = ConsultationTemporaire.objects.select_for_update().get(id=c.id)
+            
+            # On compte les réservations existantes pour donner un numéro
+            nombre_actuel = ConsultationPaye.objects.filter(temporaire_id=locked.id).count()
 
-        if locked.n_places <= 0:
-            locked.delete()
-            return err("Plus disponible.", status.HTTP_409_CONFLICT)
+            # CRÉATION DE LA RÉSERVATION (On a enlevé 'montant' ici)
+            paiement = ConsultationPaye.objects.create(
+                nom_complet=ser.validated_data["nomComplet_patient"],
+                numero_tel=ser.validated_data["numero_tel_patient"],
+                NNI=ser.validated_data["NNI"],
+                date=timezone.now(),
+                temporaire_id=locked.id,
+                doctor=locked.doctor,
+                specialite=locked.doctor.specialite,
+                numero_reservation=nombre_actuel + 1
+            )
 
-        ConsultationTemporaire.objects.filter(id=locked.id, n_places__gt=0).update(
-            n_places=F("n_places") - 1
-        )
-        locked.refresh_from_db()
+            # Mise à jour des places
+            if locked.n_places > 1:
+                locked.n_places -= 1
+                locked.save()
+            else:
+                locked.delete()
 
-        paiement = ConsultationPaye.objects.create(
-            nom_complet=ser.validated_data["nomComplet_patient"],
-            numero_tel=ser.validated_data["numero_tel_patient"],
-            date=timezone.now(),
-            temporaire_id=locked.id,
-            doctor=locked.doctor,
-            specialite=locked.doctor.specialite,
-            NNI=ser.validated_data["NNI"],
-        )
-
-        if locked.n_places == 0:
-            locked.delete()
-
-        message_text = (
-            f"Bonjour {ser.validated_data['nomComplet_patient']}, "
-            f"votre réservation est confirmée avec le docteur "
-            f"{c.doctor.user.username if c.doctor.user else c.doctor.id}. "
-            f"Spécialité: {c.doctor.specialite}. "
-            f"Montant: {c.montant} MRU."
-        )
-
-        wa_result = send_whatsapp_message(
-            ser.validated_data["numero_tel_patient"],
-            message_text
-        )
-
-    return ok({
-        "paiement_id": paiement.id,
-        "places_restantes": 0 if locked.n_places == 0 else locked.n_places,
-        "message": "Réservation créée avec succès.",
-        "whatsapp_result": wa_result,
-    }, http_status=status.HTTP_201_CREATED)
+        return Response({"ok": True, "message": "Réservation enregistrée !"}, status=201)
+    except Exception as e:
+        # Si une erreur arrive encore, elle s'affichera clairement dans le message rouge
+        return Response({"error": f"Erreur lors de l'enregistrement: {str(e)}"}, status=500)

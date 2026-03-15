@@ -41,6 +41,7 @@ class ConsultationPaye(models.Model):
     nom_complet = models.CharField(max_length=200)
     numero_tel = models.CharField(max_length=11)
     date = models.DateTimeField()
+    montant = models.IntegerField(default=0)  # <--- AJOUTE CETTE LIGNE
     NNI = models.CharField(max_length=10)
     temporaire_id = models.PositiveIntegerField(null=True, blank=True)
     numero_reservation = models.PositiveIntegerField(null=True, blank=True)

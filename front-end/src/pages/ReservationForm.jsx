@@ -19,45 +19,53 @@ function ReservationForm({ consultation, onClose }) {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+  e.preventDefault();
+  setLoading(true);
+  setError(""); 
 
-    if (!formData.nom_complet || !formData.numero_tel || !formData.NNI || !formData.montant) {
-      alert("Veuillez remplir tous les champs.");
-      return;
-    }
-
-    // Préparer les données pour le backend
-    const dataToSend = {
-      nomComplet_patient: formData.nom_complet,
-      numero_tel_patient: formData.numero_tel,
-      NNI: formData.NNI,
-      montant: parseFloat(formData.montant),
-      consultation_id: consultation.id,
+  try {
+    const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+    
+    // On envoie EXACTEMENT ce que ton SecretaryReservationSerializer attend
+    const payload = {
+      nomComplet_patient: formData.nomComplet_patient,
+      numero_tel_patient: formData.numero_tel_patient,
+      NNI: formData.numero_reservation 
     };
 
-    try {
-      const response = await fetch(apiUrl("reservations/"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(dataToSend),
-      });
+    const response = await fetch(`${API_BASE_URL}/secretary-reservation/${consultation.id}/`, {
+      method: "POST",
+      headers: { 
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json" 
+      },
+      body: JSON.stringify(payload),
+    });
 
-      const data = await response.json();
+    const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || "Erreur serveur");
+    if (response.ok) {
+      setIsSuccess(true);
+      setTimeout(() => {
+        onSuccess(); // Rafraîchit la liste des réservations
+        onClose();
+      }, 2000);
+    } else {
+      // Gestion intelligente des erreurs sans planter l'appli
+      if (data.NNI) {
+        setError("Erreur NNI: 10 chiffres maximum attendus.");
+      } else if (data.nomComplet_patient) {
+        setError("Nom du patient invalide.");
+      } else {
+        setError(data.error || "Données invalides. Vérifiez les champs.");
       }
-
-      alert("Réservation réussie !");
-      onClose();
-    } catch (err) {
-      console.error("Erreur lors de la réservation :", err);
-      alert("Erreur lors de la réservation : " + err.message);
     }
-  };
-
+  } catch (err) {
+    setError("Erreur de connexion au serveur");
+  } finally {
+    setLoading(false);
+  }
+};
   return (
     <div className="modal-overlay">
       <div className="modal">
