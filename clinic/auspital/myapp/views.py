@@ -45,10 +45,6 @@ SESSION_KEY = "payment_window_start"
 
 
 def nettoyer_consultations():
-    """
-    Supprime les consultations expirées.
-    Ici je garde ta logique telle quelle.
-    """
     today = timezone.localdate()
     ConsultationTemporaire.objects.filter(date_fin__date=today).delete()
 
@@ -71,7 +67,6 @@ class ConsultationTemporairePublicView(APIView):
         consultations = ConsultationTemporaire.objects.filter(
             date_fin__gte=timezone.now()
         ).order_by("date_fin")
-
         serializer = ConsultationTemporaireSerializer(consultations, many=True)
         return Response(serializer.data)
 
@@ -131,7 +126,7 @@ class ConsultationPayeViewSet(viewsets.ModelViewSet):
             date=temporaire.date_fin,
             specialite=temporaire.doctor.specialite,
             temporaire_id=temporaire_id,
-            numero_reservation=numero
+            numero_reservation=numero,
         )
 
         if temporaire.n_places <= 0:
@@ -148,11 +143,9 @@ class ConsultationPayeViewSet(viewsets.ModelViewSet):
             if set(request.data.keys()) != {"diagnostic"}:
                 return Response({"detail": "ONLY_DIAGNOSTIC_ALLOWED"}, status=400)
 
-            diagnostic = request.data.get("diagnostic")
-            instance.diagnostic = diagnostic
+            instance.diagnostic = request.data.get("diagnostic")
             instance.save()
-            serializer = self.get_serializer(instance)
-            return Response(serializer.data)
+            return Response(self.get_serializer(instance).data)
 
         return super().update(request, *args, **kwargs)
 
@@ -162,9 +155,6 @@ class DoctorViewSet(viewsets.ModelViewSet):
     serializer_class = DoctorSerializer
 
     def get_permissions(self):
-        # Secretaries (and admins) need to be able to fetch the list of doctors
-        # so that the dropdown on the secrétaire page can be populated.  Only
-        # administrators are allowed to create, update or delete doctors.
         if self.action in ["list", "retrieve"]:
             return [IsSecreteurOrAdmin()]
         return [IsAdministration()]
@@ -232,10 +222,6 @@ class CurrentUserView(APIView):
 
 
 class VerifyAdminCodeView(APIView):
-    """
-    Vérifie le code secret de l'admin principal.
-    Nécessite un JWT valide.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -261,21 +247,18 @@ class VerifyAdminCodeView(APIView):
 @permission_classes([AllowAny])
 def consultations_list(request):
     nettoyer_consultations()
-
     now = timezone.now()
     qs = ConsultationTemporaire.objects.filter(
         date_fin__gt=now,
-        n_places__gt=0
+        n_places__gt=0,
     ).order_by("date_fin")
-
     return ok(ConsultationTemporaireListSerializer(qs, many=True).data)
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # <--- AJOUTEZ CETTE LIGNE
+@permission_classes([AllowAny])
 def open_window(request, consultation_id):
     nettoyer_consultations()
-
     c = get_object_or_404(ConsultationTemporaire, id=consultation_id)
     now = timezone.now()
 
@@ -302,20 +285,13 @@ def open_window(request, consultation_id):
     })
 
 
-# ============================================================
-# COPIEZ CES 2 FONCTIONS DANS votre views.py
-# Remplacez l'ancienne pay_consultation par la nouvelle
-# ============================================================
-
-
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @parser_classes([MultiPartParser, FormParser])
 def pay_consultation(request, consultation_id):
     """
-    Le patient envoie son NNI + reçu Bankily.
-    On sauvegarde les images SANS vérification OCR.
-    Statut = 'en_attente' → le secrétaire doit valider.
+    Patient → envoie NNI + reçu Bankily.
+    Statut = 'en_attente' → apparaît dans la file d'attente du secrétaire.
     """
     nettoyer_consultations()
     c = get_object_or_404(ConsultationTemporaire, id=consultation_id)
@@ -324,13 +300,11 @@ def pay_consultation(request, consultation_id):
         c.delete()
         return err("Plus de places disponibles.", status.HTTP_409_CONFLICT)
 
-    # Récupérer les données du formulaire
-    nom_complet = request.data.get("nomComplet_patient", "").strip()
-    numero_tel = request.data.get("numero_tel_patient", "").strip()
-    photo_nni = request.FILES.get("photo_nni")
+    nom_complet      = request.data.get("nomComplet_patient", "").strip()
+    numero_tel       = request.data.get("numero_tel_patient", "").strip()
+    photo_nni        = request.FILES.get("photo_nni")
     capture_paiement = request.FILES.get("capture_paiement")
 
-    # Vérifications basiques
     if not nom_complet or not numero_tel:
         return err("Nom et téléphone requis.")
     if not photo_nni or not capture_paiement:
@@ -342,7 +316,7 @@ def pay_consultation(request, consultation_id):
         if locked.n_places <= 0:
             return err("Plus disponible.", status.HTTP_409_CONFLICT)
 
-        # Sauvegarder la réservation avec statut "en_attente"
+        # ✅ statut = 'en_attente' → file d'attente secrétaire
         paiement = ConsultationPaye.objects.create(
             nom_complet=nom_complet,
             numero_tel=numero_tel,
@@ -352,11 +326,10 @@ def pay_consultation(request, consultation_id):
             temporaire_id=locked.id,
             doctor=locked.doctor,
             specialite=locked.doctor.specialite,
-            montant=locked.montant,      # ← AJOUTER
-            statut='en_especes',         # ← AJOUTER
+            montant=locked.montant,
+            statut='en_attente',
         )
 
-        # Réduire les places
         if locked.n_places > 1:
             locked.n_places -= 1
             locked.save()
@@ -369,17 +342,15 @@ def pay_consultation(request, consultation_id):
     }, http_status=status.HTTP_201_CREATED)
 
 
-# ============================================================
-
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def valider_reservation(request, paiement_id):
     """
-    Le secrétaire valide ou rejette une réservation.
+    Secrétaire valide ou rejette une réservation.
     Si validé → envoi automatique d'un message WhatsApp au patient.
     """
     paiement = get_object_or_404(ConsultationPaye, id=paiement_id)
-    action = request.data.get("action")  # "valide" ou "rejete"
+    action = request.data.get("action")
 
     if action not in ["valide", "rejete"]:
         return err("Action invalide. Utilisez 'valide' ou 'rejete'.")
@@ -387,16 +358,13 @@ def valider_reservation(request, paiement_id):
     paiement.statut = action
     paiement.save()
 
-    # Envoi WhatsApp UNIQUEMENT si le secrétaire valide
     wa_result = None
     if action == "valide":
         doctor_name = (
-            paiement.doctor.user.get_full_name()
-            or paiement.doctor.user.username
+            paiement.doctor.user.get_full_name() or paiement.doctor.user.username
             if paiement.doctor and paiement.doctor.user
             else "votre médecin"
         )
-
         message_text = (
             f"Bonjour {paiement.nom_complet},\n"
             f"Votre réservation a été CONFIRMÉE.\n"
@@ -405,16 +373,21 @@ def valider_reservation(request, paiement_id):
             f"Montant payé : {paiement.montant} MRU\n"
             f"Merci de vous présenter à l'heure prévue."
         )
-
         wa_result = send_whatsapp_message(paiement.numero_tel, message_text)
 
     return ok({
         "message": f"Réservation {'validée' if action == 'valide' else 'rejetée'} avec succès.",
         "whatsapp_result": wa_result,
     })
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def secretary_reservation(request, consultation_id):
+    """
+    Secrétaire inscrit un patient directement.
+    Statut = 'valide' → va directement dans la liste, sans file d'attente.
+    """
     nettoyer_consultations()
     c = get_object_or_404(ConsultationTemporaire, id=consultation_id)
 
@@ -430,7 +403,8 @@ def secretary_reservation(request, consultation_id):
             locked = ConsultationTemporaire.objects.select_for_update().get(id=c.id)
             nombre_actuel = ConsultationPaye.objects.filter(temporaire_id=locked.id).count()
 
-            paiement = ConsultationPaye.objects.create(
+            # ✅ statut = 'valide' → liste directe, pas de file d'attente
+            ConsultationPaye.objects.create(
                 nom_complet=ser.validated_data["nomComplet_patient"],
                 numero_tel=ser.validated_data["numero_tel_patient"],
                 NNI=ser.validated_data["NNI"],
@@ -440,7 +414,7 @@ def secretary_reservation(request, consultation_id):
                 specialite=locked.doctor.specialite,
                 numero_reservation=nombre_actuel + 1,
                 montant=locked.montant,
-                statut='en_especes',  # ← VÉRIFIEZ QUE C'EST BIEN EN_ESPECES
+                statut='valide',
             )
 
             if locked.n_places > 1:
