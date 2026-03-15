@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   Hospital, LayoutDashboard, CalendarPlus, ClipboardList, LogOut,
   Edit3, Trash2, UserPlus, Clock, Search, CheckCircle2, Calendar,
-  AlertCircle, XCircle,
+  AlertCircle, XCircle, Save,
 } from "lucide-react";
 import SecretaireReservationForm from "./SecretaireReservationForm";
 import { API_BASE_URL } from "../api/config";
@@ -11,15 +11,20 @@ import "./Secretaire.css";
 const MEDIA_BASE_URL = "http://127.0.0.1:8000";
 
 export default function Secretaire({ onLogout }) {
-  const [active, setActive] = useState("consultations");
-  const [consultations, setConsultations] = useState([]);
-  const [reservations, setReservations] = useState([]);
-  const [doctors, setDoctors] = useState([]);
-  const [editingConsult, setEditingConsult] = useState(null);
+  const [active,          setActive]          = useState("consultations");
+  const [consultations,   setConsultations]   = useState([]);
+  const [reservations,    setReservations]    = useState([]);
+  const [doctors,         setDoctors]         = useState([]);
+  const [editingConsult,  setEditingConsult]  = useState(null);
   const [selectedConsult, setSelectedConsult] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [loadingAction, setLoadingAction] = useState(null);
+  const [searchTerm,      setSearchTerm]      = useState("");
+  const [loadingAction,   setLoadingAction]   = useState(null);
+
+  // ── Image modal enrichi avec NNI ──
   const [imageModal, setImageModal] = useState(null);
+  // imageModal = { src, reservationId, nni } | null
+  const [nniInput,  setNniInput]  = useState("");
+  const [nniSaving, setNniSaving] = useState(false);
 
   const [consultForm, setConsultForm] = useState({
     doctorId: "", date: "", heure: "", places: "", montant: "",
@@ -44,22 +49,52 @@ export default function Secretaire({ onLogout }) {
     const headers = getAuthHeaders();
     try {
       const [docRes, consRes, resRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/doctors/`, { headers }),
+        fetch(`${API_BASE_URL}/doctors/`,                    { headers }),
         fetch(`${API_BASE_URL}/consultations-temporaires/`, { headers }),
-        fetch(`${API_BASE_URL}/consultations-payees/`, { headers }),
+        fetch(`${API_BASE_URL}/consultations-payees/`,      { headers }),
       ]);
-      const docs = await docRes.json();
-      const cons = await consRes.json();
-      const ress = await resRes.json();
-      setDoctors(parseArray(docs));
-      setConsultations(parseArray(cons).sort((a, b) => new Date(a.date_fin) - new Date(b.date_fin)));
-      setReservations(parseArray(ress).sort((a, b) => b.id - a.id));
-    } catch (e) {
-      console.error("Fetch error", e);
-    }
+      setDoctors(parseArray(await docRes.json()));
+      setConsultations(parseArray(await consRes.json()).sort((a, b) => new Date(a.date_fin) - new Date(b.date_fin)));
+      setReservations(parseArray(await resRes.json()).sort((a, b) => b.id - a.id));
+    } catch (e) { console.error("Fetch error", e); }
   };
 
   useEffect(() => { fetchAll(); }, []);
+
+  // ── NNI : ouvrir modal photo ──
+  const openNNIModal = (r) => {
+    setNniInput(r.NNI || "");
+    setImageModal({
+      src:           `${MEDIA_BASE_URL}${r.photo_nni}`,
+      reservationId: r.id,
+      nni:           r.NNI || "",
+    });
+  };
+
+  // ── NNI : sauvegarder ──
+  const saveNNI = async () => {
+    if (!nniInput.trim() || !imageModal?.reservationId) return;
+    setNniSaving(true);
+    try {
+      const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+      const res = await fetch(`${API_BASE_URL}/consultations-payees/${imageModal.reservationId}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ NNI: nniInput.trim() }),
+      });
+      if (res.ok) {
+        // Mise à jour locale immédiate
+        setReservations(prev =>
+          prev.map(r => r.id === imageModal.reservationId ? { ...r, NNI: nniInput.trim() } : r)
+        );
+        setImageModal(prev => ({ ...prev, nni: nniInput.trim() }));
+        alert("✅ NNI enregistré avec succès.");
+      } else {
+        alert("❌ Erreur lors de l'enregistrement du NNI.");
+      }
+    } catch { alert("❌ Erreur de connexion."); }
+    finally { setNniSaving(false); }
+  };
 
   const handleConsultChange = (e) => setConsultForm({ ...consultForm, [e.target.name]: e.target.value });
 
@@ -72,20 +107,21 @@ export default function Secretaire({ onLogout }) {
     e.preventDefault();
     if (!consultForm.doctorId) { alert("Veuillez sélectionner un médecin."); return; }
     const payload = {
-      doctor: String(consultForm.doctorId),
+      doctor:   String(consultForm.doctorId),
       date_fin: `${consultForm.date}T${consultForm.heure}:00`,
-      montant: parseInt(consultForm.montant, 10),
+      montant:  parseInt(consultForm.montant, 10),
       n_places: parseInt(consultForm.places, 10),
     };
     try {
-      const res = await fetch(`${API_BASE_URL}/consultations-temporaires/`, {
-        method: editingConsult ? "PUT" : "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        editingConsult
+          ? `${API_BASE_URL}/consultations-temporaires/${editingConsult.id}/`
+          : `${API_BASE_URL}/consultations-temporaires/`,
+        { method: editingConsult ? "PUT" : "POST", headers: getAuthHeaders(), body: JSON.stringify(payload) }
+      );
       if (res.ok) { await fetchAll(); resetConsultForm(); setActive("consultations"); }
       else { const err = await res.json(); alert("Erreur : " + JSON.stringify(err)); }
-    } catch (e) { alert("Erreur de connexion"); }
+    } catch { alert("Erreur de connexion"); }
   };
 
   const editConsult = (c) => {
@@ -93,10 +129,10 @@ export default function Secretaire({ onLogout }) {
     const dt = new Date(c.date_fin);
     setConsultForm({
       doctorId: String(c.doctor?.id ?? c.doctor ?? ""),
-      date: dt.toISOString().split("T")[0],
-      heure: dt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-      places: String(c.n_places ?? ""),
-      montant: String(c.montant ?? ""),
+      date:     dt.toISOString().split("T")[0],
+      heure:    dt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+      places:   String(c.n_places ?? ""),
+      montant:  String(c.montant ?? ""),
     });
     setActive("form");
   };
@@ -108,14 +144,13 @@ export default function Secretaire({ onLogout }) {
         method: "DELETE", headers: getAuthHeaders(),
       });
       if (res.ok) fetchAll();
-    } catch (e) { alert("Erreur serveur"); }
+    } catch { alert("Erreur serveur"); }
   };
 
   const getDoctorName = (doctorInput) => {
-    if (doctorInput && typeof doctorInput === "object") {
+    if (doctorInput && typeof doctorInput === "object")
       return doctorInput.user?.username || doctorInput.name || "Médecin";
-    }
-    const found = doctors.find((d) => String(d.id) === String(doctorInput));
+    const found = doctors.find(d => String(d.id) === String(doctorInput));
     return found ? found.user?.username || found.name : "Médecin";
   };
 
@@ -135,22 +170,19 @@ export default function Secretaire({ onLogout }) {
         const err = await res.json();
         alert("Erreur : " + (err.error || JSON.stringify(err)));
       }
-    } catch (e) {
-      alert("Erreur de connexion.");
-    } finally {
-      setLoadingAction(null);
-    }
+    } catch { alert("Erreur de connexion."); }
+    finally { setLoadingAction(null); }
   };
 
-  const enAttenteList = reservations.filter((r) => r.statut === "en_attente");
+  const enAttenteList  = reservations.filter(r => r.statut === "en_attente");
   const enAttenteCount = enAttenteList.length;
 
   const statutBadge = (statut) => {
     const cfg = {
-      valide:     { bg: "#d1fae5", color: "#065f46", label: "Validé" },
-      rejete:     { bg: "#fee2e2", color: "#991b1b", label: "Rejeté" },
-      en_attente: { bg: "#fef3c7", color: "#92400e", label: "En attente" },
-      en_especes: { bg: "#ede9fe", color: "#5b21b6", label: "En espèces" },
+      valide:     { bg: "#d1fae5", color: "#065f46", label: "Validé"      },
+      rejete:     { bg: "#fee2e2", color: "#991b1b", label: "Rejeté"      },
+      en_attente: { bg: "#fef3c7", color: "#92400e", label: "En attente"  },
+      en_especes: { bg: "#ede9fe", color: "#5b21b6", label: "En espèces"  },
     };
     const c = cfg[statut] || cfg.en_attente;
     return (
@@ -160,34 +192,80 @@ export default function Secretaire({ onLogout }) {
     );
   };
 
+  // ── Modal photo NNI ──────────────────────────────────────────────
   const ImageModal = () => {
     if (!imageModal) return null;
     return (
-      <div
-        onClick={() => setImageModal(null)}
-        style={{
-          position: "fixed", inset: 0, zIndex: 9999,
-          background: "rgba(0,0,0,0.88)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          cursor: "zoom-out",
-        }}
-      >
-        <img
-          src={imageModal}
-          alt="Aperçu"
-          onClick={(e) => e.stopPropagation()}
-          style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: "12px" }}
-        />
-        <button
-          onClick={() => setImageModal(null)}
-          style={{
-            position: "absolute", top: "20px", right: "28px",
-            background: "rgba(255,255,255,0.15)", border: "none",
-            color: "white", fontSize: "24px", width: "44px", height: "44px",
-            borderRadius: "50%", cursor: "pointer", display: "flex",
-            alignItems: "center", justifyContent: "center",
-          }}
-        >✕</button>
+      <div style={{ position:"fixed", inset:0, zIndex:9999, background:"rgba(10,14,26,0.92)", backdropFilter:"blur(12px)", display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+        
+        {/* Card centrale */}
+        <div style={{ background:"#ffffff", borderRadius:"24px", overflow:"hidden", width:"100%", maxWidth:"680px", boxShadow:"0 32px 80px rgba(0,0,0,0.4)", animation:"slideUp 0.25s cubic-bezier(0.34,1.56,0.64,1)" }}>
+          
+          {/* Header */}
+          <div style={{ padding:"16px 20px", background:"linear-gradient(135deg,#1e293b,#334155)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div>
+              <p style={{ margin:0, color:"white", fontWeight:800, fontSize:"14px" }}>Carte NNI</p>
+              <p style={{ margin:0, color:"rgba(255,255,255,0.4)", fontSize:"11px" }}>{imageModal.nni ? "NNI déjà enregistré" : "Saisissez le numéro après inspection"}</p>
+            </div>
+            <button onClick={() => { setImageModal(null); setNniInput(""); }}
+              style={{ background:"rgba(255,255,255,0.1)", border:"none", color:"white", width:"32px", height:"32px", borderRadius:"8px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>
+              ✕
+            </button>
+          </div>
+
+          {/* Photo — grande taille */}
+          <div style={{ background:"#0f172a", padding:"12px", display:"flex", justifyContent:"center" }}>
+            <img src={imageModal.src} alt="Carte NNI"
+              style={{ width:"100%", maxHeight:"420px", borderRadius:"10px", objectFit:"contain" }}/>
+          </div>
+
+          {/* Champ NNI */}
+          <div style={{ padding:"20px 24px 24px" }}>
+            
+            {/* NNI déjà enregistré */}
+            {imageModal.nni && (
+              <div style={{ display:"flex", alignItems:"center", gap:"10px", background:"#f0fdf4", border:"1.5px solid #bbf7d0", borderRadius:"12px", padding:"10px 14px", marginBottom:"16px" }}>
+                <div style={{ width:"28px", height:"28px", background:"#10b981", borderRadius:"8px", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                  <span style={{ color:"white", fontSize:"14px" }}>✓</span>
+                </div>
+                <div>
+                  <p style={{ margin:0, fontSize:"10px", fontWeight:700, color:"#059669", textTransform:"uppercase", letterSpacing:"0.8px" }}>NNI enregistré</p>
+                  <p style={{ margin:0, fontFamily:"monospace", fontSize:"15px", fontWeight:800, color:"#064e3b", letterSpacing:"2px" }}>{imageModal.nni}</p>
+                </div>
+              </div>
+            )}
+
+            <label style={{ display:"block", fontSize:"11px", fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:"1px", marginBottom:"8px" }}>
+              Numéro NNI
+            </label>
+
+            <div style={{ display:"flex", gap:"10px" }}>
+              <input
+                autoFocus
+                type="text"
+                placeholder="Ex : 9876543210123456"
+                value={nniInput}
+                onChange={e => setNniInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && saveNNI()}
+                style={{ flex:1, padding:"13px 16px", background:"#f8fafc", border:"2px solid #e2e8f0", borderRadius:"12px", fontSize:"15px", fontFamily:"monospace", fontWeight:700, color:"#0f172a", outline:"none", letterSpacing:"2px", transition:"border-color 0.2s" }}
+                onFocus={e => e.target.style.borderColor = "#6366f1"}
+                onBlur={e => e.target.style.borderColor = "#e2e8f0"}
+              />
+              <button
+                onClick={saveNNI}
+                disabled={nniSaving || !nniInput.trim()}
+                style={{ padding:"13px 20px", background: nniSaving || !nniInput.trim() ? "#e2e8f0" : "linear-gradient(135deg,#4f46e5,#6366f1)", border:"none", borderRadius:"12px", color: nniSaving || !nniInput.trim() ? "#94a3b8" : "white", fontWeight:800, fontSize:"13px", cursor: nniSaving || !nniInput.trim() ? "not-allowed" : "pointer", display:"flex", alignItems:"center", gap:"7px", boxShadow: nniSaving || !nniInput.trim() ? "none" : "0 4px 14px rgba(99,102,241,0.35)", transition:"all 0.2s", whiteSpace:"nowrap" }}
+              >
+                <Save size={15}/>
+                {nniSaving ? "Sauvegarde..." : "Enregistrer"}
+              </button>
+            </div>
+
+            <p style={{ margin:"10px 0 0", fontSize:"11px", color:"#94a3b8" }}>
+              Appuyez sur <kbd style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", borderRadius:"4px", padding:"1px 6px", fontSize:"10px" }}>Entrée</kbd> ou cliquez Enregistrer.
+            </p>
+          </div>
+        </div>
       </div>
     );
   };
@@ -196,6 +274,7 @@ export default function Secretaire({ onLogout }) {
     <div className="secretaire-container">
       <ImageModal />
 
+      {/* ── SIDEBAR ── */}
       <aside className="admin-sidebar">
         <div className="sidebar-brand">
           <div className="brand-icon"><Hospital size={28} /></div>
@@ -231,11 +310,12 @@ export default function Secretaire({ onLogout }) {
         </button>
       </aside>
 
+      {/* ── MAIN ── */}
       <main className="admin-main">
         <header className="main-header">
           <div className="header-search">
             <Search size={18} />
-            <input type="text" placeholder="Rechercher un patient..." onChange={(e) => setSearchTerm(e.target.value)} />
+            <input type="text" placeholder="Rechercher un patient..." onChange={e => setSearchTerm(e.target.value)} />
           </div>
           <div className="user-profile">
             <div className="user-info text-right mr-4">
@@ -248,10 +328,10 @@ export default function Secretaire({ onLogout }) {
 
         <div className="content-wrapper">
 
-          {/* ===== DASHBOARD ===== */}
+          {/* ── DASHBOARD ── */}
           {active === "consultations" && (
             <>
-              <div className="stats-grid mb-8">
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"16px", marginBottom:"32px" }}>
                 <div className="stat-card">
                   <div className="stat-icon bg-indigo-50 text-indigo-600"><Clock size={24} /></div>
                   <div className="stat-data"><h3>{consultations.length}</h3><p>Séances actives</p></div>
@@ -260,7 +340,7 @@ export default function Secretaire({ onLogout }) {
                   <div className="stat-icon bg-emerald-50 text-emerald-600"><CheckCircle2 size={24} /></div>
                   <div className="stat-data"><h3>{reservations.length}</h3><p>Réservations</p></div>
                 </div>
-                <div className="stat-card" style={{ cursor: "pointer" }} onClick={() => setActive("attente")}>
+                <div className="stat-card" style={{ cursor:"pointer" }} onClick={() => setActive("attente")}>
                   <div className="stat-icon bg-orange-50 text-orange-500"><AlertCircle size={24} /></div>
                   <div className="stat-data"><h3>{enAttenteCount}</h3><p>En attente</p></div>
                 </div>
@@ -274,13 +354,10 @@ export default function Secretaire({ onLogout }) {
                 <div className="table-responsive">
                   <table className="modern-table">
                     <thead>
-                      <tr>
-                        <th>Médecin</th><th>Date & Heure</th><th>Montant</th><th>Places</th>
-                        <th className="text-right">Actions</th>
-                      </tr>
+                      <tr><th>Médecin</th><th>Date & Heure</th><th>Montant</th><th>Places</th><th className="text-right">Actions</th></tr>
                     </thead>
                     <tbody>
-                      {consultations.map((c) => (
+                      {consultations.map(c => (
                         <tr key={c.id}>
                           <td><p className="font-bold">{c.doctor_name || getDoctorName(c.doctor)}</p></td>
                           <td>
@@ -293,9 +370,9 @@ export default function Secretaire({ onLogout }) {
                           <td><span className="badge-count">{c.n_places} dispo</span></td>
                           <td className="text-right">
                             <div className="flex justify-end gap-2">
-                              <button className="action-icon edit" title="Modifier" onClick={() => editConsult(c)}><Edit3 size={16} /></button>
-                              <button className="action-icon delete" title="Supprimer" onClick={() => deleteConsult(c.id)}><Trash2 size={16} /></button>
-                              <button className="action-icon reserve" title="Inscrire" onClick={() => setSelectedConsult(c)}><UserPlus size={16} /></button>
+                              <button className="action-icon edit"    title="Modifier"  onClick={() => editConsult(c)}><Edit3 size={16}/></button>
+                              <button className="action-icon delete"  title="Supprimer" onClick={() => deleteConsult(c.id)}><Trash2 size={16}/></button>
+                              <button className="action-icon reserve" title="Inscrire"  onClick={() => setSelectedConsult(c)}><UserPlus size={16}/></button>
                             </div>
                           </td>
                         </tr>
@@ -307,7 +384,7 @@ export default function Secretaire({ onLogout }) {
             </>
           )}
 
-          {/* ===== FORMULAIRE SÉANCE ===== */}
+          {/* ── FORMULAIRE SÉANCE ── */}
           {active === "form" && (
             <div className="form-container-premium animate-slide-up">
               <div className="form-header-minimal">
@@ -321,7 +398,7 @@ export default function Secretaire({ onLogout }) {
                     <label>Médecin Référent</label>
                     <select name="doctorId" value={consultForm.doctorId} onChange={handleConsultChange} className="input-field" required>
                       <option value="">Choisir un médecin...</option>
-                      {doctors.map((d) => (
+                      {doctors.map(d => (
                         <option key={d.id ?? d.pk} value={d.id ?? d.pk}>
                           Dr. {d.user?.username ?? d.username ?? d.name} ({d.specialite})
                         </option>
@@ -357,7 +434,7 @@ export default function Secretaire({ onLogout }) {
             </div>
           )}
 
-          {/* ===== FILE D'ATTENTE ===== */}
+          {/* ── FILE D'ATTENTE ── */}
           {active === "attente" && (
             <div className="section-card animate-slide-up">
               <div className="card-header flex justify-between items-center">
@@ -377,12 +454,12 @@ export default function Secretaire({ onLogout }) {
                     <thead>
                       <tr>
                         <th>Patient</th><th>Médecin</th><th>Montant</th>
-                        <th>Photo NNI</th><th>Reçu Bankily</th><th>Date</th>
+                        <th>Photo NNI</th><th>NNI</th><th>Reçu Bankily</th><th>Date</th>
                         <th className="text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {enAttenteList.map((r) => (
+                      {enAttenteList.map(r => (
                         <tr key={r.id}>
                           <td>
                             <p className="font-bold text-slate-900">{r.nom_complet}</p>
@@ -393,26 +470,53 @@ export default function Secretaire({ onLogout }) {
                             <span className="text-[10px] text-slate-400 uppercase font-black">{r.specialite}</span>
                           </td>
                           <td><span className="badge-price">{r.montant} MRU</span></td>
+
+                          {/* ✅ Photo NNI — clic ouvre modal avec champ NNI */}
                           <td>
                             {r.photo_nni ? (
-                              <img src={`${MEDIA_BASE_URL}${r.photo_nni}`} alt="NNI"
-                                onClick={() => setImageModal(`${MEDIA_BASE_URL}${r.photo_nni}`)}
-                                style={{ width: "60px", height: "44px", objectFit: "cover", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "zoom-in" }} />
+                              <img
+                                src={`${MEDIA_BASE_URL}${r.photo_nni}`}
+                                alt="NNI"
+                                onClick={() => openNNIModal(r)}
+                                style={{ width: "60px", height: "44px", objectFit: "cover", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "zoom-in" }}
+                              />
                             ) : <span className="text-xs text-red-400">Manquant</span>}
                           </td>
+
+                          {/* ✅ Colonne NNI — affiche valeur ou bouton saisir */}
+                          <td>
+                            {r.NNI ? (
+                              <span style={{ fontFamily: "monospace", fontSize: "12px", fontWeight: 700, color: "#1e293b", background: "#f1f5f9", padding: "3px 8px", borderRadius: "6px" }}>
+                                {r.NNI}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => openNNIModal(r)}
+                                style={{ fontSize: "11px", color: "#6366f1", background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: "6px", padding: "3px 10px", cursor: "pointer", fontWeight: 700 }}
+                              >
+                                + Saisir
+                              </button>
+                            )}
+                          </td>
+
                           <td>
                             {r.capture_paiement ? (
-                              <img src={`${MEDIA_BASE_URL}${r.capture_paiement}`} alt="Paiement"
-                                onClick={() => setImageModal(`${MEDIA_BASE_URL}${r.capture_paiement}`)}
-                                style={{ width: "60px", height: "44px", objectFit: "cover", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "zoom-in" }} />
+                              <img
+                                src={`${MEDIA_BASE_URL}${r.capture_paiement}`}
+                                alt="Paiement"
+                                onClick={() => setImageModal({ src: `${MEDIA_BASE_URL}${r.capture_paiement}`, reservationId: null, nni: null })}
+                                style={{ width: "60px", height: "44px", objectFit: "cover", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "zoom-in" }}
+                              />
                             ) : <span className="text-xs text-red-400">Manquant</span>}
                           </td>
+
                           <td className="text-slate-600 text-sm">
                             <div className="flex items-center gap-1">
                               <Calendar size={13} className="text-slate-300" />
                               {new Date(r.date).toLocaleString("fr-FR")}
                             </div>
                           </td>
+
                           <td className="text-right">
                             <div className="flex justify-end gap-2">
                               <button className="action-icon" title="Valider" disabled={!!loadingAction}
@@ -436,7 +540,7 @@ export default function Secretaire({ onLogout }) {
             </div>
           )}
 
-          {/* ===== LISTE RÉSERVATIONS ===== */}
+          {/* ── LISTE RÉSERVATIONS ── */}
           {active === "reservations" && (
             <div className="section-card animate-slide-up">
               <div className="card-header flex justify-between items-center">
@@ -449,20 +553,26 @@ export default function Secretaire({ onLogout }) {
                 <table className="modern-table">
                   <thead>
                     <tr>
-                      <th>Patient</th><th>Contact</th><th>Médecin & Spécialité</th>
-                      <th>Statut</th><th>Date</th>
+                      <th>Patient</th><th>Contact</th><th>NNI</th>
+                      <th>Médecin & Spécialité</th><th>Statut</th><th>Date</th>
                     </tr>
                   </thead>
                   <tbody>
                     {reservations
-                      .filter((r) => r.nom_complet?.toLowerCase().includes(searchTerm.toLowerCase()))
-                      .map((r) => (
+                      .filter(r => r.nom_complet?.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(r => (
                         <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
                           <td>
                             <p className="font-bold text-slate-900">{r.nom_complet}</p>
                             <p className="text-[10px] text-slate-400">ID: #{r.id}</p>
                           </td>
                           <td className="text-slate-500 font-medium">{r.numero_tel}</td>
+                          <td>
+                            {r.NNI
+                              ? <span style={{ fontFamily: "monospace", fontSize: "12px", fontWeight: 700, color: "#1e293b", background: "#f1f5f9", padding: "3px 8px", borderRadius: "6px" }}>{r.NNI}</span>
+                              : <span className="text-xs text-slate-300">—</span>
+                            }
+                          </td>
                           <td>
                             <p className="font-bold text-indigo-600">Dr. {r.doctor_name || "Médecin"}</p>
                             <span className="text-[10px] text-slate-400 uppercase font-black">{r.specialite}</span>

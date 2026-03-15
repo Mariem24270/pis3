@@ -330,11 +330,11 @@ def pay_consultation(request, consultation_id):
             statut='en_attente',
         )
 
-        if locked.n_places > 1:
-            locked.n_places -= 1
-            locked.save()
-        else:
+        locked.n_places -= 1
+        if locked.n_places <= 0:
             locked.delete()
+        else:
+            locked.save()
 
     return ok({
         "paiement_id": paiement.id,
@@ -414,8 +414,7 @@ def secretary_reservation(request, consultation_id):
                 specialite=locked.doctor.specialite,
                 numero_reservation=nombre_actuel + 1,
                 montant=locked.montant,
-                statut='valide',
-            )
+                statut='en_especes',            )
 
             if locked.n_places > 1:
                 locked.n_places -= 1
